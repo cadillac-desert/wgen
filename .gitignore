@@ -1,0 +1,16 @@
+# Ignore all inputs and outputs
+ClimateChangeScenarios.csv
+SimulationLength.csv
+
+
+# Ignore R project files
+*.Rproj
+
+# Ignore local libraries or package directories
+.Rproj.user/
+
+# Ignore R history and session data
+.Rhistory
+.Rdata
+.Ruserdata
+

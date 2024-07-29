@@ -1,0 +1,416 @@
+Install all dependencies if first WGEN simulation.
+
+```{r}
+# Set the working directory
+#knitr::opts_knit$set(root.dir ="../")
+setwd("..")
+getwd()
+
+#install all dependencies if first time running WGEN simulation
+packages <- suppressWarnings(readLines("R_sessionInfo.txt"))
+install.packages(packages)
+```
+
+# The next code chunk represents "process.meteorology.R"
+
+This script provides the 'meteorology' input required for the WGEN run
+
+Step 1: Importing raw meteorological time series
+
+-   raw data files MUST BE formatted as: yyyy mm dd P[mm] Tmax[C] Tmin[C] \*.csv file
+
+```{r}
+# clear the current workspace
+rm(list=ls())
+
+# set working directory
+setwd("..")
+# print working directory for user
+getwd()
+
+# harcoded option
+#dir.to.all.raw.files <- "./Data/raw.data.files/"
+
+# select the folder using choose.dir() from utils package with custom title
+dir.to.all.raw.files <- utils::choose.dir(caption = "Select folder containing raw data files")
+
+
+# Check if a valid directory was selected
+if (is.null(dir.to.all.raw.files)) {
+  stop("No directory selected. Please select a valid directory.")
+}
+
+# Ensure the path ends with a backslash
+if (substr(dir.to.all.raw.files, nchar(dir.to.all.raw.files), nchar(dir.to.all.raw.files)) != "\\") {
+  dir.to.all.raw.files <- paste0(dir.to.all.raw.files, "\\")
+}
+
+# list of gridded location or station data
+list.locations <- list.files(dir.to.all.raw.files, pattern = ".csv$") 
+my.file <- read.table(paste0(dir.to.all.raw.files,list.locations[1]),sep= ",")
+# reference the first .csv date
+start_date <- paste(my.file[1,1],my.file[1,2],my.file[1,3],sep="-")
+# reference the last .csv date
+end_date <- paste(my.file[nrow(my.file),1],my.file[nrow(my.file),2],my.file[nrow(my.file),3],sep="-")
+
+# create sequence of all dates in raw data
+seq.of.dates <- seq(as.Date(start_date),as.Date(end_date),by = "day")
+lst.grids.data <- list()
+
+
+# create array of imported weather data
+ascii.array.precip.temp <- array(NA,c(length(seq.of.dates),length(list.locations),3))
+for (f in 1:length(list.locations)){
+
+  my.file <- read.table(paste0(dir.to.all.raw.files,list.locations[f]),
+                        sep= ",")
+  ascii.array.precip.temp[,f,1] <- my.file[,4] # precip -- verify this
+  ascii.array.precip.temp[,f,2] <- my.file[,5] # tmax -- verify this
+  ascii.array.precip.temp[,f,3] <- my.file[,6] # tmin -- verify this
+  prct.print <- round(f/length(list.locations)*100,2)
+  print(paste('done -> location',f,'/',
+              length(list.locations),', %',prct.print))
+}
+
+lst.import.datafile <- list('ascii.array.precip.temp'=ascii.array.precip.temp,
+                            'seq.of.dates'=seq.of.dates,
+                            'file.names'=list.locations)
+# save weather data for future use
+saveRDS(lst.import.datafile,
+        file='./Data/processed.data.files/processed.meteorology/lst.import.datafile.rds')
+
+#------------------------------------------------------------------ 
+##/ Step 2: Organizing input data for WGEN runs \##
+
+# import the inputted weather data
+lst.import.datafile <- readRDS(file='./Data/processed.data.files/processed.meteorology/lst.import.datafile.rds')
+
+
+# oragnize weather data for the basin processing
+ascii.array.precip.temp <- lst.import.datafile$ascii.array.precip.temp
+dates.weather <- lst.import.datafile$seq.of.dates
+list.file.names <- lst.import.datafile$file.names
+rm(lst.import.datafile) # for memory
+
+years.weather <- as.numeric(format(format(dates.weather,'%Y')))
+months.weather <- as.numeric(format(format(dates.weather,'%m')))
+wateryears.weather <- (years.weather+1)*(months.weather>=10) + (years.weather)*(months.weather<10)
+
+n.sites <- dim(ascii.array.precip.temp)[2]
+prcp.site <- ascii.array.precip.temp[,,1]
+tmax.site <- ascii.array.precip.temp[,,2]
+tmin.site <- ascii.array.precip.temp[,,3]
+
+rm(ascii.array.precip.temp)
+
+prcp.basin <- apply(prcp.site,1,mean)
+tmax.basin <- apply(tmax.site,1,mean)
+tmin.basin <- apply(tmin.site,1,mean)
+
+
+# create annual average for basin precipitation
+prcp.basin.annual <- aggregate(prcp.basin,FUN=mean,by=list(years.weather),na.rm=T)
+prcp.basin.annual[,2] <- scale(prcp.basin.annual[,2])[,1]
+
+# create annual average for basin temperature mean.
+tmin.basin.annual <- aggregate(tmin.basin,FUN=mean,by=list(years.weather),na.rm=T)
+tmin.basin.annual[,2] <- scale(tmin.basin.annual[,2])[,1]
+tmax.basin.annual <- aggregate(tmax.basin,FUN=mean,by=list(years.weather),na.rm=T)
+tmax.basin.annual[,2] <- scale(tmax.basin.annual[,2])[,1]
+
+save(list = ls(envir = environment(), all.names = TRUE), 
+     file = "./Data/processed.data.files/processed.meteorology/processed.meteorology.RData",
+     envir = environment())
+
+gc()
+```
+
+# Next code chunk represents "config.simulations.R"
+
+```{r}
+
+# set working directory
+setwd("..")
+
+config.simulations <- function(){
+  
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  ######  ---------------> Simulation Length <------------------------------- ######
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  {
+    ##length of final simulated weather (in calendar years)##
+
+    simulation.length <- suppressWarnings(read.table('SimulationLength.csv',header=TRUE,sep=","))
+
+    number.years.long <- simulation.length$number_of_years_per_ensemble_member 
+    # {e.g., 500, 1000, 2000, 3000, 5000 years,...} [note: current NHMM output (parametric) is for 1036 years; current non-parametric is for 3050 years]
+    num.iter <- simulation.length$number_of_ensemble_members 
+    # A single long trace (e.g., thousand years) is sufficient, although more can be developed if desired
+  }
+  
+  
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  ######---->Thermodynamic Climate Change Scenario<-------------------------######
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  {
+    ##-------------Define perturbations-------------##
+    ## climate changes and jitter to apply:
+    climate.change.scenarios <- suppressWarnings(read.table('ClimateChangeScenarios.csv',header=TRUE,sep=","))
+
+    change.list <- data.frame("tc.max"=  climate.change.scenarios$max_temperature_change_degC, # {e.g., 0, 1, 2, ...} (changes in temperature)
+                              "tc.min"=  climate.change.scenarios$min_temperature_change_degC, # {e.g., 0, 1, 2, ...} (changes in temperature)
+                              "pmuc"= climate.change.scenarios$mean_precipitation_change_percent/100, # {e.g., 0, -.125, .125, ...} (changes in precipitation mean)
+                              "pccc"= climate.change.scenarios$extreme_precipitation_scaling_rate_percent/100 # {e.g., 0, 0.07, 0.14, ...} (changes for precipitation extreme quantile -- CC)
+    )
+    ##----------------------------------------------##
+  }
+  
+  
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  ######  ---------------->Dates for Weather Data<--------------------------######
+  ######  --------------------------------------------------------------------------
+  ######  --------------------------------------------------------------------------
+  {
+    lst.import.datafile <- tryCatch(suppressMessages(readRDS(file='./Data/processed.data.files/processed.meteorology/lst.import.datafile.rds')),
+    
+                               
+  error=function(e) {
+    message('You have not yet run process.meteorology.R')
+    print(e)
+    })
+    start.date.weather <- lst.import.datafile$seq.of.dates[1]
+    end.date.weather <- lst.import.datafile$seq.of.dates[length(lst.import.datafile$seq.of.dates)]
+  }
+  
+  ######  ----------------------------------------
+  ######  ----------------------------------------
+  ######----> Directories <---------######
+  ######  ----------------------------------------
+  ######  ----------------------------------------
+  {
+    dir.to.sim.files <- "./Data/simulated.data.files/WGEN.out"
+    dir.create(file.path(dir.to.sim.files), showWarnings = FALSE)
+
+    # directory to store output files
+    dir.to.output.files <- './Data/output.data.files/'
+    
+    ##location of obs weather data (RData format): weather data (e.g., precip and temp) as matrices (time x lat|lon: t-by-number of grids); dates vector for time; basin average precip (see the example meteohydro file)
+
+    path.to.processed.data.meteohydro <- "./Data/processed.data.files/processed.meteorology/processed.meteorology.RData"
+
+  }
+  
+  
+  ######  -----------------------------------------------------
+  ######  -----------------------------------------------------
+  ######  -------> WGEN Hyperparameters <--------------- ######
+  ######  -----------------------------------------------------
+  ######  -----------------------------------------------------
+  {
+    first.month <- 1
+    last.month <- 12
+    months <- seq(first.month,last.month) # Jan-Dec calendar year
+    ##threshold for mixed Gamma-GPD population separation
+    qq <- .99  
+    
+    #keep the jittering on
+    to.jitter <- TRUE
+    
+    ##bootstrapping choices##
+    window.size <- rep(3,length(months))   
+    #the size of the window (in days) from which runs can be bootstrapped around the current day of simulation, by month: Jan -- Dec
+    pr.trace <- 0.25     
+    # {0.25 mm, 0.01 in} trace prcp threshold. 0.25 mm (for Livneh dataset); or 0.01 inches: lower threshold below which day is considered dry
+    
+    ##load in supporting functions
+    files.sources = list.files("./Programs/functions",full.names = TRUE)
+    my.functions <- sapply(files.sources, source)
+  }
+  
+  ######  -------------------------------------------------------------------------
+  ######  -------------------------------------------------------------------------
+  ######----> Hyperparameters of the WRs Identification and Simulations<-----######
+  ######  -------------------------------------------------------------------------
+  ######  -------------------------------------------------------------------------
+  {
+    ##Choose below whether to use provided WRs (TRUE), or run WRs identification from scratch (FALSE)
+    use.provided.WRs <- TRUE 
+    #{TRUE, FALSE}: TRUE for the WRs already provided for the Pacific/North American sector in 1948-2021
+    
+    start.date.synoptic="1948-01-01"; end.date.synoptic="2021-12-31" 
+    # from processed GPHA file
+
+
+    start.date.WRs="1948-01-01"; end.date.WRs="2019-12-31" 
+    # proper leap year orders (starting with leap year of 1948, ending a year before (i.e., 2019) the leap year of 2020)
+    
+    dates.WRs.specific <- seq(as.Date(start.date.WRs),as.Date(end.date.WRs),by="day")
+    
+    num.years.sim.WRs <- number.years.long # e.g., 500, 1000, 2000, 3000, 5000 years, etc [note: current NHMM output (parametric) is for 1036 years]
+#change to user input?    
+    
+    dir.to.sim.WRs.files <- "./Data/simulated.data.files/WRs.out" # dir.to.sim.WRs.files
+    
+    num.iter.WRs <- num.iter   #number of iterations to simulate sequence of WRs
+#change to user input? 
+    path.to.processed.GPHAs <- './Data/processed.data.files/processed.hgt/hgt.500.Pacific.NorthAmer.synoptic.region_19480101_20211231.rds'
+    
+    # Covariates should be a matrix with the first column as dates, and the second column as 
+    #      ... normalized pPC1 (scaled and centered)
+    
+    path.to.processed.SPI.PCs <- './Data/processed.data.files/processed.NHMM.data/paleo.norm.4.cold.PCs.dates_extracted.rds'
+    
+#define seasons and covariates for NHMM models of WRs
+    cold.months <- c(11,12,1,2,3,4) # Nov-Apr
+    warm.months <- c(5,6,7,8,9,10)  #May-Oct
+    num.PCs <- 10
+    seasons <- list(cold.months,warm.months)
+    num_eofs.season <- rep(num.PCs,length(seasons))  #number of PCs to use for geopotential heights per season
+    num_WRs.season <- c(7,3)    #number of WRs to fit per season
+    
+    ##Choose below whether through parametric or non-parametric way to create the simulated WRs ##
+    dynamic.scenario  <- 0 # {0, 1}: 0: no dynamic change; 1: yes dynamic change 
+    
+    if (dynamic.scenario==0){
+      ##===> Attempt #0 (thermodynamic only; no change to freq of WRs) ===##
+      # #specify target change (as a percent) for WR probabilities
+      WR_prob_change <- c(0,0,0,0,0,0,0,0,0,0) # between 0 and 1
+      # #how close (in % points) do the WR frequencies (probabilities) need to be to the target
+      lp.threshold <- 0.00001
+      # #how much change do we allow in a sub-period sampling probability before incurring a larger penalty in the optimization
+      piecewise_limit <- .02
+      
+      #   --------- NOTE: some of these hyper-parameters may need tuning depending on the dynamic climate change selected
+      
+      #   --------- Attempt with caution!!!!
+    }else if(dynamic.scenario==1){
+      ##===> Attempt #1 (dynamic scenario #1) ===##
+      # #specify target change (as a percent) for WR probabilities (if, increasing WR3 in future)
+      WR_prob_change <- c(0,0,.3,0,0,0,0,0,0,0) # between 0 and 1
+      # #how close (in % points) do the WR frequencies (probabilities) need to be to the target
+      lp.threshold <- 0.007
+      # #how much change do we allow in a sub-period sampling probability before incurring a larger penalty in the optimization
+      piecewise_limit <- .02
+      
+      ##===> Other option explored in final report===##
+      # specify target change (as a percent) for WR probabilities (if, continuing their current trends in future)
+      #WR_prob_change <- c(-0.09969436,  0.27467048,  0.33848792,
+      #                    -0.28431861, -0.23549986,  0.03889970,
+      #                    -0.05628958, 0.38059153, -0.16636739, -0.17995965) # between 0 and 1
+      # how close (in % points) do the WR frequencies (probabilities) need to be to the target
+      #lp.threshold <- 0.008
+      # how much change do we allow in a sub-period sampling probability before incurring a larger penalty in the optimization
+      #piecewise_limit <- .02
+      
+    }
+    
+    
+    # returning the entire values inserted here to 'run.stochastic.weather.generator'
+    values = as.list(environment())
+    return(values)
+  }
+}
+```
+
+# Next code chunk represents "run.stochastic.weather.generator.R"
+
+```{r}
+
+
+
+
+
+# set working directory 
+setwd("..")
+
+
+
+# clear environment
+rm(list=ls())
+
+# import all dependecies which were installed by first code chunk
+library(MASS) # Gamma fit
+library(evmix) # GPD fit
+library(eva) # GPD fit
+library(depmixS4) # HMMs/NHMMs fit
+library(markovchain) # HMMs/NHMMs fit
+library(rebmix) # split/WRs
+library(lpSolve) # lp optimization
+library(mvtnorm) # MVN
+library(lubridate) # dates
+library(tictoc) # run time
+library(moments) # computation
+library(abind) # computation
+#--------------------------------
+library(zoo) # (plot)
+library(fExtremes) # (plot)
+library(scales) # (plot)
+library(parallel) # (plot)
+library(proxy) # (plot)
+library(POT) # (plot) event-based computations
+library(extRemes) # (plot)
+library(ismev) # (plot)
+library(readxl) # output
+
+
+
+source("./Programs/config.simulations.R") # config file
+lst <- config.simulations() # call in configuration inputs
+for (i in 1:length(lst)) {assign(names(lst[i]), lst[[i]]) }; rm(lst)
+
+rm(lst)
+
+#--- Weather Regimes Module ---#
+#use provided WRs
+if (use.provided.WRs){
+
+  final.NHMM.output <- readRDS('./Data/simulated.data.files/WRs.out/final.NHMM.non_param.output.rds')
+  weather.state.assignments <- final.NHMM.output$WR.historical # this is the historical WRs 
+  num.states <- length(unique(as.vector(weather.state.assignments)))    #number of WRs in the model
+  dates.sim <- final.NHMM.output$dates.sim
+  markov.chain.sim <- final.NHMM.output$WR.simulation
+  dates.synoptics <- final.NHMM.output$dates.historical
+#simulate your own WRs
+} else{
+  final.NHMM.output <- execute.WRs.non_param.NHMM()
+  weather.state.assignments <- final.NHMM.output$WR.historical # this is the historical WRs 
+  num.states <- length(unique(as.vector(weather.state.assignments)))    #number of WRs in the model
+  dates.sim <- final.NHMM.output$dates.sim
+  markov.chain.sim <- final.NHMM.output$WR.simulation
+  dates.synoptics <- final.NHMM.output$dates.historical
+}
+rm(final.NHMM.output) # for memory
+
+
+#--- Weather Generation Module ---#
+suppressWarnings(execute.simulations())
+# done. #
+
+
+# EXTRA #
+### Below are auxiliary functions to do a list of tasks
+# - create sample figures for selected scenario
+# - generate individual output files in tab or text delimited formats
+
+#this is the scenario (i.e., the row in ClimateChangeScenarios.csv) for which to make plots and write out the data as .csv files
+selected_scenario = 1
+
+#--- figures ---#
+# arguments are labels for x and y-axes
+start_time <- Sys.time()
+create.figures.baselines.stacked(scenario = selected_scenario)
+Sys.time() - start_time
+
+
+#--- outputs ---#
+# YYYY, MM, DD, P(mm), Tmax(C), Tmin(C) in .csv individual lat/lon file #
+# for simulated data #
+create.delimited.outputs(scenario = selected_scenario)
+
+
+```
