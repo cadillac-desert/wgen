@@ -1,8 +1,3 @@
-# Ignore all inputs and outputs
-ClimateChangeScenarios.csv
-SimulationLength.csv
-
-
 # Ignore R project files
 *.Rproj
 
