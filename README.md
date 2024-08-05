@@ -89,7 +89,7 @@ In order to run, you will need to follow the steps below:
 
 1. Once you have installed `R`, `Rstudio`, and `RTools` and have dowloaded or cloned the repository, you can open the R Markdown notebook titled `WeatherGenerator.rmd`. Run the first code chunk to instal all the dependencies listed in `R_sessionInfo.txt`. This code chunk only needs to be run one time, on the first simulation.
 
-2. Then, place your input files into the repository as indicated by the Repository section of this README. If you are planning to use the inputs provided in `wgen_input_example.zip`, you must paste the contents from this zip file into the base folder of this repository and allow the current `Data/` folder to be replaced by what is in the zip file.
+2. Then, place your input files into the repository as indicated by the Repository section of this README. If you are planning to use the inputs provided from `wgen_input_example.zip` in [wgen_input_data](https://github.com/cadillac-desert/wgen_input_data), you must paste the contents from this zip file into the base folder of this repository and allow the current `Data/` folder to be replaced by what is in the zip file.
 
 3. Next, run the second code chunk of `WeatherGenerator.rmd`, this second code chunk represents `process.meteorology.R` which prepares input meteorology raw data required to be sent to the weather generator.
 
