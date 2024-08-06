@@ -6,9 +6,9 @@ Install all dependencies if first WGEN simulation.
 setwd("..")
 getwd()
 
-#install all dependencies if first time running WGEN simulation
-packages <- suppressWarnings(readLines("R_sessionInfo.txt"))
-install.packages(packages)
+# Install all dependencies if first time running WGEN simulation
+packages <- readLines("R_sessionInfo.txt")
+suppressWarnings(install.packages(packages))
 ```
 
 # The next code chunk represents "process.meteorology.R"
